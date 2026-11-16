@@ -1,16 +1,17 @@
-# дз 6 (лекция 7) - класс Matrix
+# дз 6 (лекция 8) - класс BigInt
 
-матрица из int32_t, память через new/delete, без vector
+большие целые числа, цифры лежат в динамическом массиве (new/delete, без vector)
 
-- getRows / getColumns
-- m[i][j] - через прокси-класс ProxyRow, вылет за границы -> std::out_of_range
-- *=  на число
-- + двух матриц (если размеры разные - тоже out_of_range)
-- == и !=
-- вывод в ostream (числа через пробел, каждая строка матрицы с новой строки)
+- конструкторы от int32_t, std::string и const char*, на плохую строку кидается std::invalid_argument
+- копирование и перемещение
+- + - * (BigInt с BigInt и BigInt с int32_t справа), унарный минус
+- сравнения только BigInt с BigInt
+- вывод в ostream
+
+умножение в столбик, O(n^2)
 
 файлы:
-- matrix.hpp / matrix.cpp - сам класс
+- bigint.hpp / bigint.cpp - сам класс
 - test.cpp - тесты (gtest)
 - CMakeLists.txt - сборка, googletest подтягивается через FetchContent
 

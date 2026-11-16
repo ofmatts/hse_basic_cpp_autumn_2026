@@ -1,423 +1,516 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
+#include <string>
+#include <utility>
 
-#include "matrix.hpp"
+#include "bigint.hpp"
 
-TEST(Matrix, Sizes)
+// чтобы не писать каждый раз stringstream
+static std::string str(const BigInt &x)
 {
-    Matrix m(5, 3);
-    EXPECT_EQ(m.getRows(), 5u);
-    EXPECT_EQ(m.getColumns(), 3u);
+    std::stringstream ss;
+    ss << x;
+    return ss.str();
 }
 
-TEST(Matrix, ZeroAtStart)
+TEST(BigInt, DefaultIsZero)
 {
-    Matrix m(3, 4);
-    for (size_t i = 0; i < 3; i++)
-        for (size_t j = 0; j < 4; j++)
-            EXPECT_EQ(m[i][j], 0);
+    BigInt a;
+    EXPECT_EQ(str(a), "0");
 }
 
-TEST(Matrix, SetGet)
+TEST(BigInt, FromInt)
 {
-    Matrix m(5, 3);
-    m[1][2] = 5;
-    m[4][1] = -8;
-    m[0][0] = 1;
-    m[4][2] = 100;
-
-    EXPECT_EQ(m[1][2], 5);
-    EXPECT_EQ(m[4][1], -8);
-    EXPECT_EQ(m[0][0], 1);
-    EXPECT_EQ(m[4][2], 100);
-    // остальное не задели
-    EXPECT_EQ(m[1][1], 0);
-    EXPECT_EQ(m[2][2], 0);
+    EXPECT_EQ(str(BigInt(0)), "0");
+    EXPECT_EQ(str(BigInt(5)), "5");
+    EXPECT_EQ(str(BigInt(-5)), "-5");
+    EXPECT_EQ(str(BigInt(1000)), "1000");
+    EXPECT_EQ(str(BigInt(-120034)), "-120034");
 }
 
-TEST(Matrix, ConstGet)
+TEST(BigInt, FromIntLimits)
 {
-    Matrix m(2, 2);
-    m[1][0] = 7;
-    const Matrix &cm = m;
-    EXPECT_EQ(cm[1][0], 7);
-    EXPECT_EQ(cm[0][1], 0);
+    EXPECT_EQ(str(BigInt(std::numeric_limits<int32_t>::max())), "2147483647");
+    EXPECT_EQ(str(BigInt(std::numeric_limits<int32_t>::min())), "-2147483648");
 }
 
-TEST(Matrix, OutOfRangeRows)
+TEST(BigInt, FromString)
 {
-    Matrix m(2, 3);
-    EXPECT_NO_THROW(m[1]);
-    EXPECT_THROW(m[2], std::out_of_range);
-    EXPECT_THROW(m[3][0], std::out_of_range);
-    EXPECT_THROW(m[1000][0], std::out_of_range);
+    EXPECT_EQ(str(BigInt("123456789012345678901234567890")), "123456789012345678901234567890");
+    EXPECT_EQ(str(BigInt(std::string("-98765432109876543210"))), "-98765432109876543210");
+    EXPECT_EQ(str(BigInt("+17")), "17");
 }
 
-TEST(Matrix, OutOfRangeColumns)
+TEST(BigInt, FromStringLeadingZeros)
 {
-    Matrix m(2, 3);
-    EXPECT_NO_THROW(m[0][2]);
-    EXPECT_THROW(m[0][3], std::out_of_range);
-    EXPECT_THROW(m[1][4], std::out_of_range);
-    EXPECT_THROW(m[1][1000], std::out_of_range);
+    EXPECT_EQ(str(BigInt("000123")), "123");
+    EXPECT_EQ(str(BigInt("-0007")), "-7");
 }
 
-TEST(Matrix, OutOfRangeConst)
+TEST(BigInt, FromStringZero)
 {
-    const Matrix m(2, 3);
-    EXPECT_NO_THROW(m[1][2]);
-    EXPECT_THROW(m[2][0], std::out_of_range);
-    EXPECT_THROW(m[0][3], std::out_of_range);
+    EXPECT_EQ(str(BigInt("0")), "0");
+    EXPECT_EQ(str(BigInt("0000")), "0");
+    // минус ноль - это просто ноль
+    EXPECT_EQ(str(BigInt("-0")), "0");
+    EXPECT_EQ(str(BigInt("-000")), "0");
+    EXPECT_TRUE(BigInt("-0") == BigInt(0));
 }
 
-TEST(Matrix, OutOfRangeWrite)
+TEST(BigInt, FromStringBad)
 {
-    Matrix m(2, 2);
-    EXPECT_THROW(m[2][0] = 1, std::out_of_range);
-    EXPECT_THROW(m[0][2] = 1, std::out_of_range);
+    EXPECT_THROW(BigInt(""), std::invalid_argument);
+    EXPECT_THROW(BigInt("-"), std::invalid_argument);
+    EXPECT_THROW(BigInt("+"), std::invalid_argument);
+    EXPECT_THROW(BigInt("12a3"), std::invalid_argument);
+    EXPECT_THROW(BigInt("abc"), std::invalid_argument);
+    EXPECT_THROW(BigInt("12 3"), std::invalid_argument);
+    EXPECT_THROW(BigInt("1-2"), std::invalid_argument);
+    EXPECT_THROW(BigInt("--5"), std::invalid_argument);
+    EXPECT_THROW(BigInt("1.5"), std::invalid_argument);
 }
 
-TEST(Matrix, Empty)
+TEST(BigInt, Example)
 {
-    Matrix a(0, 0);
-    EXPECT_EQ(a.getRows(), 0u);
-    EXPECT_EQ(a.getColumns(), 0u);
-    EXPECT_THROW(a[0], std::out_of_range);
-
-    Matrix b(0, 5);
-    EXPECT_THROW(b[0][0], std::out_of_range);
-
-    // строки есть, а столбцов нет
-    Matrix c(3, 0);
-    EXPECT_NO_THROW(c[0]);
-    EXPECT_THROW(c[0][0], std::out_of_range);
-    EXPECT_THROW(c[3], std::out_of_range);
+    // пример из задания
+    BigInt a = 1;
+    BigInt b("123456789012345678901234567890");
+    BigInt c = a * b + 2;
+    BigInt d;
+    d = std::move(c);
+    a = d + b;
+    EXPECT_EQ(str(a), "246913578024691357802469135782");
 }
 
-TEST(Matrix, OneByOne)
+TEST(BigInt, AddSimple)
 {
-    Matrix m(1, 1);
-    m[0][0] = 9;
-    EXPECT_EQ(m[0][0], 9);
-    EXPECT_THROW(m[1][0], std::out_of_range);
-    EXPECT_THROW(m[0][1], std::out_of_range);
+    EXPECT_EQ(str(BigInt(2) + BigInt(3)), "5");
+    EXPECT_EQ(str(BigInt(-2) + BigInt(-3)), "-5");
+    EXPECT_EQ(str(BigInt(0) + BigInt(0)), "0");
+    EXPECT_EQ(str(BigInt(0) + BigInt(7)), "7");
+    EXPECT_EQ(str(BigInt(-7) + BigInt(0)), "-7");
 }
 
-TEST(Matrix, Multiply)
+TEST(BigInt, AddCarry)
 {
-    Matrix m(2, 2);
-    m[0][0] = 1;
-    m[0][1] = -2;
-    m[1][0] = 0;
-    m[1][1] = 5;
-    m *= 3;
-
-    EXPECT_EQ(m[0][0], 3);
-    EXPECT_EQ(m[0][1], -6);
-    EXPECT_EQ(m[1][0], 0);
-    EXPECT_EQ(m[1][1], 15);
+    EXPECT_EQ(str(BigInt(9) + BigInt(1)), "10");
+    EXPECT_EQ(str(BigInt("999999999999999999999") + BigInt(1)), "1000000000000000000000");
+    EXPECT_EQ(str(BigInt("99999999999999999999") + BigInt("99999999999999999999")), "199999999999999999998");
 }
 
-TEST(Matrix, MultiplyByZeroOneMinusOne)
+TEST(BigInt, AddDifferentLength)
 {
-    Matrix m(2, 3);
-    for (size_t i = 0; i < 2; i++)
-        for (size_t j = 0; j < 3; j++)
-            m[i][j] = i * 3 + j + 1;
-
-    Matrix orig = m;
-    m *= 1;
-    EXPECT_TRUE(m == orig);
-
-    m *= -1;
-    EXPECT_EQ(m[0][0], -1);
-    EXPECT_EQ(m[1][2], -6);
-
-    m *= 0;
-    for (size_t i = 0; i < 2; i++)
-        for (size_t j = 0; j < 3; j++)
-            EXPECT_EQ(m[i][j], 0);
+    EXPECT_EQ(str(BigInt("100000000000000000000") + BigInt(5)), "100000000000000000005");
+    EXPECT_EQ(str(BigInt(5) + BigInt("100000000000000000000")), "100000000000000000005");
 }
 
-TEST(Matrix, MultiplyReturnsSelf)
+TEST(BigInt, AddDifferentSigns)
 {
-    Matrix m(1, 2);
-    m[0][1] = 2;
-    (m *= 2) *= 3;
-    EXPECT_EQ(m[0][1], 12);
+    EXPECT_EQ(str(BigInt(10) + BigInt(-3)), "7");
+    EXPECT_EQ(str(BigInt(3) + BigInt(-10)), "-7");
+    EXPECT_EQ(str(BigInt(-10) + BigInt(3)), "-7");
+    EXPECT_EQ(str(BigInt(-3) + BigInt(10)), "7");
 }
 
-TEST(Matrix, MultiplyEmpty)
+TEST(BigInt, AddToZero)
 {
-    Matrix m(0, 0);
-    m *= 5;
-    EXPECT_EQ(m.getRows(), 0u);
+    BigInt r = BigInt("123456789012345678901234567890") + BigInt("-123456789012345678901234567890");
+    EXPECT_EQ(str(r), "0");
+    EXPECT_TRUE(r == BigInt(0));
+    // и после этого можно спокойно прибавлять
+    EXPECT_EQ(str(r + 5), "5");
+    EXPECT_EQ(str(r + -5), "-5");
 }
 
-TEST(Matrix, Plus)
+TEST(BigInt, AddInt)
 {
-    Matrix a(2, 2);
-    Matrix b(2, 2);
-    a[0][0] = 1;
-    a[0][1] = 2;
-    a[1][0] = 3;
-    a[1][1] = 4;
-    b[0][0] = 10;
-    b[1][1] = -4;
-
-    Matrix c = a + b;
-    EXPECT_EQ(c[0][0], 11);
-    EXPECT_EQ(c[0][1], 2);
-    EXPECT_EQ(c[1][0], 3);
-    EXPECT_EQ(c[1][1], 0);
-
-    // исходные не поменялись
-    EXPECT_EQ(a[0][0], 1);
-    EXPECT_EQ(b[0][0], 10);
-    EXPECT_EQ(b[1][1], -4);
+    BigInt a("100000000000000000000");
+    EXPECT_EQ(str(a + 1), "100000000000000000001");
+    EXPECT_EQ(str(a + -1), "99999999999999999999");
+    EXPECT_EQ(str(BigInt(-5) + 5), "0");
+    EXPECT_EQ(str(a + std::numeric_limits<int32_t>::max()), "100000000002147483647");
+    EXPECT_EQ(str(a + std::numeric_limits<int32_t>::min()), "99999999997852516352");
 }
 
-TEST(Matrix, PlusChain)
+TEST(BigInt, SubSimple)
 {
-    Matrix a(1, 2);
-    a[0][0] = 1;
-    a[0][1] = 2;
-    Matrix r = a + a + a;
-    EXPECT_EQ(r[0][0], 3);
-    EXPECT_EQ(r[0][1], 6);
+    EXPECT_EQ(str(BigInt(5) - BigInt(3)), "2");
+    EXPECT_EQ(str(BigInt(3) - BigInt(5)), "-2");
+    EXPECT_EQ(str(BigInt(-3) - BigInt(5)), "-8");
+    EXPECT_EQ(str(BigInt(-3) - BigInt(-5)), "2");
+    EXPECT_EQ(str(BigInt(3) - BigInt(-5)), "8");
+    EXPECT_EQ(str(BigInt(0) - BigInt(5)), "-5");
+    EXPECT_EQ(str(BigInt(5) - BigInt(0)), "5");
+    EXPECT_EQ(str(BigInt(0) - BigInt(0)), "0");
 }
 
-TEST(Matrix, PlusDifferentSizes)
+TEST(BigInt, SubBorrow)
 {
-    Matrix a(2, 2);
-    Matrix b(2, 3);
-    Matrix c(3, 2);
-    Matrix d(3, 3);
-    EXPECT_THROW(a + b, std::out_of_range);
-    EXPECT_THROW(a + c, std::out_of_range);
-    EXPECT_THROW(a + d, std::out_of_range);
+    EXPECT_EQ(str(BigInt(1000) - BigInt(1)), "999");
+    EXPECT_EQ(str(BigInt("100000000000000000000") - BigInt(1)), "99999999999999999999");
+    EXPECT_EQ(str(BigInt("1000000000000000000000") - BigInt("999999999999999999999")), "1");
+    EXPECT_EQ(str(BigInt("123456789012345678901234567890") - BigInt("987654321098765432109876543210")),
+              "-864197532086419753208641975320");
 }
 
-TEST(Matrix, PlusEmpty)
+TEST(BigInt, SubSame)
 {
-    Matrix a(0, 0);
-    Matrix b(0, 0);
-    Matrix c = a + b;
-    EXPECT_EQ(c.getRows(), 0u);
-    EXPECT_EQ(c.getColumns(), 0u);
+    BigInt a("55555555555555555555");
+    EXPECT_EQ(str(a - a), "0");
+    EXPECT_EQ(str(a - BigInt("55555555555555555555")), "0");
+    // результат должен быть нормальным нулём
+    EXPECT_TRUE((a - a) == BigInt(0));
+    EXPECT_TRUE((a - a) == -(a - a));
 }
 
-TEST(Matrix, PlusBigValues)
+TEST(BigInt, SubInt)
 {
-    Matrix a(1, 1);
-    Matrix b(1, 1);
-    a[0][0] = 1000000000;
-    b[0][0] = 1000000000;
-    Matrix c = a + b;
-    EXPECT_EQ(c[0][0], 2000000000);
+    BigInt a("100000000000000000000");
+    EXPECT_EQ(str(a - 1), "99999999999999999999");
+    EXPECT_EQ(str(a - -1), "100000000000000000001");
+    EXPECT_EQ(str(BigInt(3) - 10), "-7");
+    EXPECT_EQ(str(BigInt(0) - std::numeric_limits<int32_t>::min()), "2147483648");
 }
 
-TEST(Matrix, Equality)
+TEST(BigInt, MulSimple)
 {
-    Matrix a(2, 2);
-    Matrix b(2, 2);
+    EXPECT_EQ(str(BigInt(6) * BigInt(7)), "42");
+    EXPECT_EQ(str(BigInt(-6) * BigInt(7)), "-42");
+    EXPECT_EQ(str(BigInt(6) * BigInt(-7)), "-42");
+    EXPECT_EQ(str(BigInt(-6) * BigInt(-7)), "42");
+}
+
+TEST(BigInt, MulZero)
+{
+    EXPECT_EQ(str(BigInt(0) * BigInt(5)), "0");
+    EXPECT_EQ(str(BigInt(5) * BigInt(0)), "0");
+    EXPECT_EQ(str(BigInt(0) * BigInt(0)), "0");
+    // минус на ноль не должен давать "-0"
+    EXPECT_EQ(str(BigInt(-5) * BigInt(0)), "0");
+    EXPECT_EQ(str(BigInt(0) * BigInt(-5)), "0");
+    EXPECT_EQ(str(BigInt("-123456789012345678901234567890") * 0), "0");
+}
+
+TEST(BigInt, MulOne)
+{
+    BigInt a("123456789012345678901234567890");
+    EXPECT_EQ(str(a * 1), "123456789012345678901234567890");
+    EXPECT_EQ(str(a * -1), "-123456789012345678901234567890");
+    EXPECT_EQ(str(BigInt(1) * a), "123456789012345678901234567890");
+}
+
+TEST(BigInt, MulBig)
+{
+    BigInt a("123456789012345678901234567890");
+    BigInt b("987654321098765432109876543210");
+    EXPECT_EQ(str(a * b), "121932631137021795226185032733622923332237463801111263526900");
+    EXPECT_EQ(str(a * -b), "-121932631137021795226185032733622923332237463801111263526900");
+    EXPECT_EQ(str(-a * -b), "121932631137021795226185032733622923332237463801111263526900");
+}
+
+TEST(BigInt, MulCarries)
+{
+    // много девяток, переносы идут через все разряды
+    EXPECT_EQ(str(BigInt("99999999999999999999") * BigInt("99999999999999999999")),
+              "9999999999999999999800000000000000000001");
+    EXPECT_EQ(str(BigInt(99999) * BigInt(99999)), "9999800001");
+    EXPECT_EQ(str(BigInt("10000000000") * BigInt("10000000000")), "100000000000000000000");
+}
+
+TEST(BigInt, MulInt)
+{
+    BigInt a("12345678901234567890");
+    EXPECT_EQ(str(a * 10), "123456789012345678900");
+    EXPECT_EQ(str(a * -10), "-123456789012345678900");
+    EXPECT_EQ(str(BigInt(2) * std::numeric_limits<int32_t>::max()), "4294967294");
+    EXPECT_EQ(str(BigInt(std::numeric_limits<int32_t>::min()) * std::numeric_limits<int32_t>::min()),
+              "4611686018427387904");
+}
+
+TEST(BigInt, Factorial)
+{
+    BigInt f = 1;
+    for (int i = 1; i <= 30; i++)
+        f = f * i;
+    EXPECT_EQ(str(f), "265252859812191058636308480000000");
+}
+
+TEST(BigInt, Power)
+{
+    BigInt p = 1;
+    for (int i = 0; i < 100; i++)
+        p = p * 2;
+    EXPECT_EQ(str(p), "1267650600228229401496703205376");
+}
+
+TEST(BigInt, UnaryMinus)
+{
+    EXPECT_EQ(str(-BigInt(5)), "-5");
+    EXPECT_EQ(str(-BigInt(-5)), "5");
+    EXPECT_EQ(str(-BigInt("123456789012345678901234567890")), "-123456789012345678901234567890");
+    EXPECT_EQ(str(-(-BigInt("123456789012345678901234567890"))), "123456789012345678901234567890");
+}
+
+TEST(BigInt, UnaryMinusZero)
+{
+    EXPECT_EQ(str(-BigInt(0)), "0");
+    EXPECT_EQ(str(-BigInt()), "0");
+    EXPECT_TRUE(-BigInt(0) == BigInt(0));
+}
+
+TEST(BigInt, UnaryMinusDoesNotChangeOriginal)
+{
+    BigInt a = 7;
+    BigInt b = -a;
+    EXPECT_EQ(str(a), "7");
+    EXPECT_EQ(str(b), "-7");
+}
+
+TEST(BigInt, Equal)
+{
+    EXPECT_TRUE(BigInt(5) == BigInt(5));
+    EXPECT_FALSE(BigInt(5) == BigInt(6));
+    EXPECT_FALSE(BigInt(5) == BigInt(-5));
+    EXPECT_TRUE(BigInt(-5) == BigInt(-5));
+    EXPECT_TRUE(BigInt() == BigInt(0));
+    EXPECT_TRUE(BigInt("123456789012345678901234567890") == BigInt("123456789012345678901234567890"));
+    // отличаются только последней цифрой
+    EXPECT_FALSE(BigInt("123456789012345678901234567890") == BigInt("123456789012345678901234567891"));
+    // отличаются длиной
+    EXPECT_FALSE(BigInt("1000") == BigInt("10000"));
+}
+
+TEST(BigInt, NotEqual)
+{
+    EXPECT_TRUE(BigInt(5) != BigInt(6));
+    EXPECT_TRUE(BigInt(5) != BigInt(-5));
+    EXPECT_FALSE(BigInt(5) != BigInt(5));
+    EXPECT_FALSE(BigInt(0) != BigInt(-0));
+}
+
+TEST(BigInt, Less)
+{
+    EXPECT_TRUE(BigInt(1) < BigInt(2));
+    EXPECT_FALSE(BigInt(2) < BigInt(1));
+    EXPECT_FALSE(BigInt(2) < BigInt(2));
+    EXPECT_TRUE(BigInt(-2) < BigInt(1));
+    EXPECT_FALSE(BigInt(1) < BigInt(-2));
+    EXPECT_TRUE(BigInt(-3) < BigInt(-2));
+    EXPECT_FALSE(BigInt(-2) < BigInt(-3));
+    EXPECT_FALSE(BigInt(-2) < BigInt(-2));
+    EXPECT_TRUE(BigInt(-1) < BigInt(0));
+    EXPECT_TRUE(BigInt(0) < BigInt(1));
+    EXPECT_FALSE(BigInt(0) < BigInt(0));
+}
+
+TEST(BigInt, LessDifferentLength)
+{
+    EXPECT_TRUE(BigInt(999) < BigInt(1000));
+    EXPECT_FALSE(BigInt(1000) < BigInt(999));
+    EXPECT_TRUE(BigInt(-1000) < BigInt(-999));
+    EXPECT_FALSE(BigInt(-999) < BigInt(-1000));
+    EXPECT_TRUE(BigInt("99999999999999999999") < BigInt("100000000000000000000"));
+    EXPECT_TRUE(BigInt("-100000000000000000000") < BigInt("-99999999999999999999"));
+}
+
+TEST(BigInt, LessSameLengthDifferentDigit)
+{
+    EXPECT_TRUE(BigInt("123456789012345678901234567890") < BigInt("123456789012345678901234567891"));
+    EXPECT_FALSE(BigInt("123456789012345678901234567891") < BigInt("123456789012345678901234567890"));
+    EXPECT_TRUE(BigInt("1999") < BigInt("2000"));
+    EXPECT_TRUE(BigInt("-2000") < BigInt("-1999"));
+    EXPECT_FALSE(BigInt("2000") < BigInt("1999"));
+}
+
+TEST(BigInt, Greater)
+{
+    EXPECT_TRUE(BigInt(2) > BigInt(1));
+    EXPECT_FALSE(BigInt(1) > BigInt(2));
+    EXPECT_FALSE(BigInt(1) > BigInt(1));
+    EXPECT_TRUE(BigInt(1) > BigInt(-2));
+    EXPECT_TRUE(BigInt(-2) > BigInt(-3));
+    EXPECT_FALSE(BigInt(-3) > BigInt(-2));
+    EXPECT_TRUE(BigInt(0) > BigInt(-1));
+}
+
+TEST(BigInt, LessEqual)
+{
+    EXPECT_TRUE(BigInt(1) <= BigInt(2));
+    EXPECT_TRUE(BigInt(2) <= BigInt(2));
+    EXPECT_FALSE(BigInt(3) <= BigInt(2));
+    EXPECT_TRUE(BigInt(-3) <= BigInt(-3));
+    EXPECT_TRUE(BigInt(-3) <= BigInt(-2));
+    EXPECT_FALSE(BigInt(-2) <= BigInt(-3));
+    EXPECT_TRUE(BigInt(0) <= BigInt(-0));
+}
+
+TEST(BigInt, GreaterEqual)
+{
+    EXPECT_TRUE(BigInt(2) >= BigInt(1));
+    EXPECT_TRUE(BigInt(2) >= BigInt(2));
+    EXPECT_FALSE(BigInt(1) >= BigInt(2));
+    EXPECT_TRUE(BigInt(-3) >= BigInt(-3));
+    EXPECT_TRUE(BigInt(-2) >= BigInt(-3));
+    EXPECT_FALSE(BigInt(-3) >= BigInt(-2));
+    EXPECT_TRUE(BigInt(0) >= BigInt(-0));
+}
+
+
+TEST(BigInt, CopyConstructor)
+{
+    BigInt a("123456789012345678901234567890");
+    BigInt b(a);
     EXPECT_TRUE(a == b);
-    EXPECT_FALSE(a != b);
 
-    a[1][0] = 42;
-    EXPECT_FALSE(a == b);
-    EXPECT_TRUE(a != b);
-
-    b[1][0] = 42;
-    EXPECT_TRUE(a == b);
-    EXPECT_FALSE(a != b);
+    // b должен быть независимой копией
+    b = b + 1;
+    EXPECT_EQ(str(a), "123456789012345678901234567890");
+    EXPECT_EQ(str(b), "123456789012345678901234567891");
 }
 
-TEST(Matrix, EqualitySelf)
+TEST(BigInt, CopyConstructorZero)
 {
-    Matrix a(3, 3);
-    a[2][2] = 1;
-    EXPECT_TRUE(a == a);
-    EXPECT_FALSE(a != a);
-}
-
-TEST(Matrix, EqualityFirstAndLastElementDiffers)
-{
-    Matrix a(3, 3);
-    Matrix b(3, 3);
-    b[2][2] = 1;
-    EXPECT_TRUE(a != b);
-
-    Matrix c(3, 3);
-    Matrix d(3, 3);
-    d[0][0] = 1;
-    EXPECT_TRUE(c != d);
-}
-
-TEST(Matrix, EqualityDifferentSizes)
-{
-    Matrix a(2, 3);
-    Matrix b(3, 2);   // элементов столько же, но форма другая
-    Matrix c(2, 2);
-    Matrix d(1, 6);
-    EXPECT_FALSE(a == b);
-    EXPECT_TRUE(a != b);
-    EXPECT_FALSE(a == c);
-    EXPECT_TRUE(a != c);
-    EXPECT_FALSE(a == d);
-    EXPECT_TRUE(a != d);
-}
-
-TEST(Matrix, EqualityEmpty)
-{
-    Matrix a(0, 0);
-    Matrix b(0, 0);
+    BigInt a;
+    BigInt b(a);
+    EXPECT_EQ(str(b), "0");
     EXPECT_TRUE(a == b);
 }
 
-TEST(Matrix, Output)
+TEST(BigInt, CopyAssign)
 {
-    Matrix m(2, 3);
-    int x = 1;
-    for (size_t i = 0; i < 2; i++)
-        for (size_t j = 0; j < 3; j++)
-            m[i][j] = x++;
-
-    std::ostringstream out;
-    out << m;
-    EXPECT_EQ(out.str(), "1 2 3\n4 5 6\n");
-}
-
-TEST(Matrix, OutputNegativeOneElement)
-{
-    Matrix m(1, 1);
-    m[0][0] = -15;
-    std::ostringstream out;
-    out << m;
-    EXPECT_EQ(out.str(), "-15\n");
-}
-
-TEST(Matrix, OutputEmpty)
-{
-    Matrix m(0, 0);
-    std::ostringstream out;
-    out << m;
-    EXPECT_EQ(out.str(), "");
-}
-
-TEST(Matrix, OutputChain)
-{
-    Matrix a(1, 2);
-    a[0][0] = 1;
-    a[0][1] = 2;
-    std::ostringstream out;
-    out << a << "|" << a;
-    EXPECT_EQ(out.str(), "1 2\n|1 2\n");
-}
-
-TEST(Matrix, OutputSum)
-{
-    Matrix a(1, 2);
-    a[0][0] = 1;
-    a[0][1] = 2;
-    std::ostringstream out;
-    out << a + a;
-    EXPECT_EQ(out.str(), "2 4\n");
-}
-
-TEST(Matrix, Copy)
-{
-    Matrix a(2, 2);
-    a[0][1] = 7;
-    Matrix b = a;
-    EXPECT_TRUE(a == b);
-
-    b[0][1] = 8;
-    EXPECT_EQ(a[0][1], 7);
-    EXPECT_EQ(b[0][1], 8);
-    EXPECT_TRUE(a != b);
-}
-
-TEST(Matrix, Assign)
-{
-    Matrix a(2, 2);
-    a[1][1] = 9;
-    Matrix b(1, 3);
+    BigInt a("-123456789012345678901234567890");
+    BigInt b = 5;
     b = a;
-
-    EXPECT_EQ(b.getRows(), 2u);
-    EXPECT_EQ(b.getColumns(), 2u);
     EXPECT_TRUE(a == b);
+    EXPECT_EQ(str(b), "-123456789012345678901234567890");
 
-    b[1][1] = 10;
-    EXPECT_EQ(a[1][1], 9);
-
-    // после присваивания границы тоже новые
-    EXPECT_THROW(b[0][2], std::out_of_range);
-    EXPECT_THROW(b[2][0], std::out_of_range);
+    a = a + 1;
+    EXPECT_EQ(str(b), "-123456789012345678901234567890");
 }
 
-TEST(Matrix, AssignSelf)
+TEST(BigInt, CopyAssignToShorterAndLonger)
 {
-    Matrix a(2, 2);
-    a[1][1] = 9;
-    Matrix &ref = a;
+    BigInt big("123456789012345678901234567890");
+    BigInt small = 3;
+
+    small = big;
+    EXPECT_EQ(str(small), "123456789012345678901234567890");
+
+    BigInt big2("99999999999999999999999999");
+    big2 = BigInt(3);
+    EXPECT_EQ(str(big2), "3");
+}
+
+TEST(BigInt, CopyAssignZero)
+{
+    BigInt a("123456789012345678901234567890");
+    BigInt z;
+    a = z;
+    EXPECT_EQ(str(a), "0");
+}
+
+TEST(BigInt, SelfAssign)
+{
+    BigInt a("123456789012345678901234567890");
+    BigInt &ref = a;
     a = ref;
-    EXPECT_EQ(a[1][1], 9);
-    EXPECT_EQ(a.getRows(), 2u);
+    EXPECT_EQ(str(a), "123456789012345678901234567890");
+
+    a = std::move(ref);
+    EXPECT_EQ(str(a), "123456789012345678901234567890");
 }
 
-TEST(Matrix, AssignToBigger)
+TEST(BigInt, ChainAssign)
 {
-    Matrix a(1, 1);
-    a[0][0] = 3;
-    Matrix b(4, 4);
-    b[3][3] = 1;
-    b = a;
-    EXPECT_EQ(b.getRows(), 1u);
-    EXPECT_EQ(b.getColumns(), 1u);
-    EXPECT_EQ(b[0][0], 3);
-    EXPECT_THROW(b[3][3], std::out_of_range);
+    BigInt a, b, c;
+    a = b = c = BigInt("-777777777777777777777");
+    EXPECT_EQ(str(a), "-777777777777777777777");
+    EXPECT_EQ(str(b), "-777777777777777777777");
+    EXPECT_EQ(str(c), "-777777777777777777777");
 }
 
-TEST(Matrix, AssignChain)
+TEST(BigInt, MoveConstructor)
 {
-    Matrix a(1, 1);
-    a[0][0] = 4;
-    Matrix b(2, 2);
-    Matrix c(3, 3);
-    c = b = a;
-    EXPECT_TRUE(b == a);
-    EXPECT_TRUE(c == a);
+    BigInt a("123456789012345678901234567890");
+    BigInt b(std::move(a));
+    EXPECT_EQ(str(b), "123456789012345678901234567890");
+
+    // после перемещения a - валидный ноль
+    EXPECT_EQ(str(a), "0");
+    EXPECT_TRUE(a == BigInt(0));
+    a = BigInt(15);
+    EXPECT_EQ(str(a), "15");
 }
 
-TEST(Matrix, ExampleFromTask)
+TEST(BigInt, MoveAssign)
 {
-    const size_t rows = 5;
-    const size_t cols = 3;
+    BigInt a("-123456789012345678901234567890");
+    BigInt b("5");
+    b = std::move(a);
+    EXPECT_EQ(str(b), "-123456789012345678901234567890");
+    EXPECT_EQ(str(a), "0");
 
-    Matrix m(rows, cols);
-    EXPECT_EQ(m.getRows(), 5u);
-    EXPECT_EQ(m.getColumns(), 3u);
+    // перемещённый объект можно использовать
+    a = b + 1;
+    EXPECT_EQ(str(a), "-123456789012345678901234567889");
+}
 
-    m[1][2] = 5;
-    int32_t x = m[4][1];
-    EXPECT_EQ(x, 0);
+TEST(BigInt, MoveZero)
+{
+    BigInt a;
+    BigInt b(std::move(a));
+    EXPECT_EQ(str(b), "0");
 
-    m *= 3;
-    EXPECT_EQ(m[1][2], 15);
+    BigInt c = 5;
+    c = std::move(b);
+    EXPECT_EQ(str(c), "0");
+}
 
-    Matrix m1(rows, cols);
-    EXPECT_FALSE(m1 == m);
+TEST(BigInt, ReturnFromFunction)
+{
+    auto make = []() {
+        BigInt x("99999999999999999999");
+        return x + 1;
+    };
+    BigInt r = make();
+    EXPECT_EQ(str(r), "100000000000000000000");
+}
 
-    Matrix m2 = m1 + m;
-    EXPECT_TRUE(m2 == m);
+TEST(BigInt, Output)
+{
+    std::stringstream ss;
+    ss << BigInt(12) << ' ' << BigInt(-34) << ' ' << BigInt(0);
+    EXPECT_EQ(ss.str(), "12 -34 0");
+}
 
-    std::ostringstream out;
-    out << m2;
-    EXPECT_EQ(out.str(), "0 0 0\n0 0 15\n0 0 0\n0 0 0\n0 0 0\n");
+TEST(BigInt, ConstOperands)
+{
+    const BigInt a = 10;
+    const BigInt b = 20;
+    EXPECT_EQ(str(a + b), "30");
+    EXPECT_EQ(str(a - b), "-10");
+    EXPECT_EQ(str(a * b), "200");
+    EXPECT_EQ(str(-a), "-10");
+    EXPECT_TRUE(a < b);
+}
+
+TEST(BigInt, LongNumbers)
+{
+    // 1000 цифр
+    std::string s(1000, '9');
+    BigInt a(s);
+    EXPECT_EQ(str(a), s);
+
+    std::string expected = "1" + std::string(1000, '0');
+    EXPECT_EQ(str(a + 1), expected);
+    EXPECT_EQ(str((a + 1) - 1), s);
+
+    // (10^1000 - 1)^2 = 10^2000 - 2 * 10^1000 + 1
+    std::string sq = std::string(999, '9') + "8" + std::string(999, '0') + "1";
+    EXPECT_EQ(str(a * a), sq);
 }
 
