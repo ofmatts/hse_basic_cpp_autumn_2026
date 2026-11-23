@@ -1,516 +1,936 @@
 #include <gtest/gtest.h>
-
-#include <cstdint>
-#include <limits>
-#include <sstream>
+#include <memory>
 #include <stdexcept>
 #include <string>
-#include <utility>
 
-#include "bigint.hpp"
+#include "vector.hpp"
 
-// чтобы не писать каждый раз stringstream
-static std::string str(const BigInt &x)
+// штука чтобы считать сколько объектов сейчас живёт (ловим утечки и двойные удаления)
+struct Counted
 {
-    std::stringstream ss;
-    ss << x;
-    return ss.str();
+    static int alive;
+    static int copies;
+    int value;
+
+    Counted(int v = 0) : value(v) { alive++; }
+    Counted(const Counted &o) : value(o.value) { alive++; copies++; }
+    Counted(Counted &&o) noexcept : value(o.value) { alive++; o.value = -1; }
+    Counted &operator=(const Counted &o) { value = o.value; copies++; return *this; }
+    Counted &operator=(Counted &&o) noexcept { value = o.value; o.value = -1; return *this; }
+    ~Counted() { alive--; }
+};
+int Counted::alive = 0;
+int Counted::copies = 0;
+
+// ---------- общий vector ----------
+
+TEST(Vector, DefaultConstructor)
+{
+    my::vector<int> v;
+    EXPECT_TRUE(v.empty());
+    EXPECT_EQ(v.size(), 0);
+    EXPECT_EQ(v.capacity(), 0);
+    EXPECT_EQ(v.data(), nullptr);
 }
 
-TEST(BigInt, DefaultIsZero)
+TEST(Vector, SizeConstructor)
 {
-    BigInt a;
-    EXPECT_EQ(str(a), "0");
+    my::vector<int> v(5);
+    EXPECT_EQ(v.size(), 5);
+    EXPECT_FALSE(v.empty());
+    for (size_t i = 0; i < v.size(); i++)
+        EXPECT_EQ(v[i], 0);
 }
 
-TEST(BigInt, FromInt)
+TEST(Vector, SizeValueConstructor)
 {
-    EXPECT_EQ(str(BigInt(0)), "0");
-    EXPECT_EQ(str(BigInt(5)), "5");
-    EXPECT_EQ(str(BigInt(-5)), "-5");
-    EXPECT_EQ(str(BigInt(1000)), "1000");
-    EXPECT_EQ(str(BigInt(-120034)), "-120034");
+    my::vector<std::string> v(3, "abc");
+    EXPECT_EQ(v.size(), 3);
+    for (size_t i = 0; i < 3; i++)
+        EXPECT_EQ(v[i], "abc");
 }
 
-TEST(BigInt, FromIntLimits)
+TEST(Vector, InitializerList)
 {
-    EXPECT_EQ(str(BigInt(std::numeric_limits<int32_t>::max())), "2147483647");
-    EXPECT_EQ(str(BigInt(std::numeric_limits<int32_t>::min())), "-2147483648");
+    my::vector<int> v = {1, 2, 3, 4};
+    EXPECT_EQ(v.size(), 4);
+    EXPECT_EQ(v[0], 1);
+    EXPECT_EQ(v[3], 4);
 }
 
-TEST(BigInt, FromString)
+TEST(Vector, SubscriptWrite)
 {
-    EXPECT_EQ(str(BigInt("123456789012345678901234567890")), "123456789012345678901234567890");
-    EXPECT_EQ(str(BigInt(std::string("-98765432109876543210"))), "-98765432109876543210");
-    EXPECT_EQ(str(BigInt("+17")), "17");
+    my::vector<int> v = {1, 2, 3};
+    v[1] = 20;
+    EXPECT_EQ(v[1], 20);
+
+    const my::vector<int> &c = v;
+    EXPECT_EQ(c[1], 20);
 }
 
-TEST(BigInt, FromStringLeadingZeros)
+TEST(Vector, FrontBack)
 {
-    EXPECT_EQ(str(BigInt("000123")), "123");
-    EXPECT_EQ(str(BigInt("-0007")), "-7");
+    my::vector<int> v = {7, 8, 9};
+    EXPECT_EQ(v.front(), 7);
+    EXPECT_EQ(v.back(), 9);
+
+    v.front() = 1;
+    v.back() = 3;
+    EXPECT_EQ(v[0], 1);
+    EXPECT_EQ(v[2], 3);
+
+    const my::vector<int> &c = v;
+    EXPECT_EQ(c.front(), 1);
+    EXPECT_EQ(c.back(), 3);
 }
 
-TEST(BigInt, FromStringZero)
+TEST(Vector, SingleElementFrontBack)
 {
-    EXPECT_EQ(str(BigInt("0")), "0");
-    EXPECT_EQ(str(BigInt("0000")), "0");
-    // минус ноль - это просто ноль
-    EXPECT_EQ(str(BigInt("-0")), "0");
-    EXPECT_EQ(str(BigInt("-000")), "0");
-    EXPECT_TRUE(BigInt("-0") == BigInt(0));
+    my::vector<int> v;
+    v.push_back(42);
+    EXPECT_EQ(&v.front(), &v.back());
 }
 
-TEST(BigInt, FromStringBad)
+TEST(Vector, Data)
 {
-    EXPECT_THROW(BigInt(""), std::invalid_argument);
-    EXPECT_THROW(BigInt("-"), std::invalid_argument);
-    EXPECT_THROW(BigInt("+"), std::invalid_argument);
-    EXPECT_THROW(BigInt("12a3"), std::invalid_argument);
-    EXPECT_THROW(BigInt("abc"), std::invalid_argument);
-    EXPECT_THROW(BigInt("12 3"), std::invalid_argument);
-    EXPECT_THROW(BigInt("1-2"), std::invalid_argument);
-    EXPECT_THROW(BigInt("--5"), std::invalid_argument);
-    EXPECT_THROW(BigInt("1.5"), std::invalid_argument);
+    my::vector<int> v = {1, 2, 3};
+    int *p = v.data();
+    EXPECT_EQ(p[0], 1);
+    EXPECT_EQ(p[2], 3);
+    p[1] = 5;
+    EXPECT_EQ(v[1], 5);
+    EXPECT_EQ(p, &v[0]);
+
+    const my::vector<int> &c = v;
+    EXPECT_EQ(c.data(), p);
 }
 
-TEST(BigInt, Example)
+TEST(Vector, MaxSize)
 {
-    // пример из задания
-    BigInt a = 1;
-    BigInt b("123456789012345678901234567890");
-    BigInt c = a * b + 2;
-    BigInt d;
-    d = std::move(c);
-    a = d + b;
-    EXPECT_EQ(str(a), "246913578024691357802469135782");
+    my::vector<int> v;
+    EXPECT_GT(v.max_size(), 1000000);
+
+    my::vector<char> c;
+    EXPECT_GT(c.max_size(), v.max_size());
 }
 
-TEST(BigInt, AddSimple)
+TEST(Vector, PushBack)
 {
-    EXPECT_EQ(str(BigInt(2) + BigInt(3)), "5");
-    EXPECT_EQ(str(BigInt(-2) + BigInt(-3)), "-5");
-    EXPECT_EQ(str(BigInt(0) + BigInt(0)), "0");
-    EXPECT_EQ(str(BigInt(0) + BigInt(7)), "7");
-    EXPECT_EQ(str(BigInt(-7) + BigInt(0)), "-7");
-}
-
-TEST(BigInt, AddCarry)
-{
-    EXPECT_EQ(str(BigInt(9) + BigInt(1)), "10");
-    EXPECT_EQ(str(BigInt("999999999999999999999") + BigInt(1)), "1000000000000000000000");
-    EXPECT_EQ(str(BigInt("99999999999999999999") + BigInt("99999999999999999999")), "199999999999999999998");
-}
-
-TEST(BigInt, AddDifferentLength)
-{
-    EXPECT_EQ(str(BigInt("100000000000000000000") + BigInt(5)), "100000000000000000005");
-    EXPECT_EQ(str(BigInt(5) + BigInt("100000000000000000000")), "100000000000000000005");
-}
-
-TEST(BigInt, AddDifferentSigns)
-{
-    EXPECT_EQ(str(BigInt(10) + BigInt(-3)), "7");
-    EXPECT_EQ(str(BigInt(3) + BigInt(-10)), "-7");
-    EXPECT_EQ(str(BigInt(-10) + BigInt(3)), "-7");
-    EXPECT_EQ(str(BigInt(-3) + BigInt(10)), "7");
-}
-
-TEST(BigInt, AddToZero)
-{
-    BigInt r = BigInt("123456789012345678901234567890") + BigInt("-123456789012345678901234567890");
-    EXPECT_EQ(str(r), "0");
-    EXPECT_TRUE(r == BigInt(0));
-    // и после этого можно спокойно прибавлять
-    EXPECT_EQ(str(r + 5), "5");
-    EXPECT_EQ(str(r + -5), "-5");
-}
-
-TEST(BigInt, AddInt)
-{
-    BigInt a("100000000000000000000");
-    EXPECT_EQ(str(a + 1), "100000000000000000001");
-    EXPECT_EQ(str(a + -1), "99999999999999999999");
-    EXPECT_EQ(str(BigInt(-5) + 5), "0");
-    EXPECT_EQ(str(a + std::numeric_limits<int32_t>::max()), "100000000002147483647");
-    EXPECT_EQ(str(a + std::numeric_limits<int32_t>::min()), "99999999997852516352");
-}
-
-TEST(BigInt, SubSimple)
-{
-    EXPECT_EQ(str(BigInt(5) - BigInt(3)), "2");
-    EXPECT_EQ(str(BigInt(3) - BigInt(5)), "-2");
-    EXPECT_EQ(str(BigInt(-3) - BigInt(5)), "-8");
-    EXPECT_EQ(str(BigInt(-3) - BigInt(-5)), "2");
-    EXPECT_EQ(str(BigInt(3) - BigInt(-5)), "8");
-    EXPECT_EQ(str(BigInt(0) - BigInt(5)), "-5");
-    EXPECT_EQ(str(BigInt(5) - BigInt(0)), "5");
-    EXPECT_EQ(str(BigInt(0) - BigInt(0)), "0");
-}
-
-TEST(BigInt, SubBorrow)
-{
-    EXPECT_EQ(str(BigInt(1000) - BigInt(1)), "999");
-    EXPECT_EQ(str(BigInt("100000000000000000000") - BigInt(1)), "99999999999999999999");
-    EXPECT_EQ(str(BigInt("1000000000000000000000") - BigInt("999999999999999999999")), "1");
-    EXPECT_EQ(str(BigInt("123456789012345678901234567890") - BigInt("987654321098765432109876543210")),
-              "-864197532086419753208641975320");
-}
-
-TEST(BigInt, SubSame)
-{
-    BigInt a("55555555555555555555");
-    EXPECT_EQ(str(a - a), "0");
-    EXPECT_EQ(str(a - BigInt("55555555555555555555")), "0");
-    // результат должен быть нормальным нулём
-    EXPECT_TRUE((a - a) == BigInt(0));
-    EXPECT_TRUE((a - a) == -(a - a));
-}
-
-TEST(BigInt, SubInt)
-{
-    BigInt a("100000000000000000000");
-    EXPECT_EQ(str(a - 1), "99999999999999999999");
-    EXPECT_EQ(str(a - -1), "100000000000000000001");
-    EXPECT_EQ(str(BigInt(3) - 10), "-7");
-    EXPECT_EQ(str(BigInt(0) - std::numeric_limits<int32_t>::min()), "2147483648");
-}
-
-TEST(BigInt, MulSimple)
-{
-    EXPECT_EQ(str(BigInt(6) * BigInt(7)), "42");
-    EXPECT_EQ(str(BigInt(-6) * BigInt(7)), "-42");
-    EXPECT_EQ(str(BigInt(6) * BigInt(-7)), "-42");
-    EXPECT_EQ(str(BigInt(-6) * BigInt(-7)), "42");
-}
-
-TEST(BigInt, MulZero)
-{
-    EXPECT_EQ(str(BigInt(0) * BigInt(5)), "0");
-    EXPECT_EQ(str(BigInt(5) * BigInt(0)), "0");
-    EXPECT_EQ(str(BigInt(0) * BigInt(0)), "0");
-    // минус на ноль не должен давать "-0"
-    EXPECT_EQ(str(BigInt(-5) * BigInt(0)), "0");
-    EXPECT_EQ(str(BigInt(0) * BigInt(-5)), "0");
-    EXPECT_EQ(str(BigInt("-123456789012345678901234567890") * 0), "0");
-}
-
-TEST(BigInt, MulOne)
-{
-    BigInt a("123456789012345678901234567890");
-    EXPECT_EQ(str(a * 1), "123456789012345678901234567890");
-    EXPECT_EQ(str(a * -1), "-123456789012345678901234567890");
-    EXPECT_EQ(str(BigInt(1) * a), "123456789012345678901234567890");
-}
-
-TEST(BigInt, MulBig)
-{
-    BigInt a("123456789012345678901234567890");
-    BigInt b("987654321098765432109876543210");
-    EXPECT_EQ(str(a * b), "121932631137021795226185032733622923332237463801111263526900");
-    EXPECT_EQ(str(a * -b), "-121932631137021795226185032733622923332237463801111263526900");
-    EXPECT_EQ(str(-a * -b), "121932631137021795226185032733622923332237463801111263526900");
-}
-
-TEST(BigInt, MulCarries)
-{
-    // много девяток, переносы идут через все разряды
-    EXPECT_EQ(str(BigInt("99999999999999999999") * BigInt("99999999999999999999")),
-              "9999999999999999999800000000000000000001");
-    EXPECT_EQ(str(BigInt(99999) * BigInt(99999)), "9999800001");
-    EXPECT_EQ(str(BigInt("10000000000") * BigInt("10000000000")), "100000000000000000000");
-}
-
-TEST(BigInt, MulInt)
-{
-    BigInt a("12345678901234567890");
-    EXPECT_EQ(str(a * 10), "123456789012345678900");
-    EXPECT_EQ(str(a * -10), "-123456789012345678900");
-    EXPECT_EQ(str(BigInt(2) * std::numeric_limits<int32_t>::max()), "4294967294");
-    EXPECT_EQ(str(BigInt(std::numeric_limits<int32_t>::min()) * std::numeric_limits<int32_t>::min()),
-              "4611686018427387904");
-}
-
-TEST(BigInt, Factorial)
-{
-    BigInt f = 1;
-    for (int i = 1; i <= 30; i++)
-        f = f * i;
-    EXPECT_EQ(str(f), "265252859812191058636308480000000");
-}
-
-TEST(BigInt, Power)
-{
-    BigInt p = 1;
+    my::vector<int> v;
     for (int i = 0; i < 100; i++)
-        p = p * 2;
-    EXPECT_EQ(str(p), "1267650600228229401496703205376");
+    {
+        v.push_back(i);
+        EXPECT_EQ(v.size(), (size_t)i + 1);
+        EXPECT_GE(v.capacity(), v.size());
+    }
+    for (int i = 0; i < 100; i++)
+        EXPECT_EQ(v[i], i);
 }
 
-TEST(BigInt, UnaryMinus)
+TEST(Vector, PushBackOwnElement)
 {
-    EXPECT_EQ(str(-BigInt(5)), "-5");
-    EXPECT_EQ(str(-BigInt(-5)), "5");
-    EXPECT_EQ(str(-BigInt("123456789012345678901234567890")), "-123456789012345678901234567890");
-    EXPECT_EQ(str(-(-BigInt("123456789012345678901234567890"))), "123456789012345678901234567890");
+    // ссылка на свой же элемент в момент перевыделения памяти
+    my::vector<std::string> v;
+    v.push_back("hello");
+    for (int i = 0; i < 20; i++)
+        v.push_back(v[0]);
+    for (size_t i = 0; i < v.size(); i++)
+        EXPECT_EQ(v[i], "hello");
 }
 
-TEST(BigInt, UnaryMinusZero)
+TEST(Vector, PushBackMove)
 {
-    EXPECT_EQ(str(-BigInt(0)), "0");
-    EXPECT_EQ(str(-BigInt()), "0");
-    EXPECT_TRUE(-BigInt(0) == BigInt(0));
+    my::vector<std::string> v;
+    std::string s = "some long string that does not fit into sso buffer";
+    v.push_back(std::move(s));
+    EXPECT_EQ(v[0], "some long string that does not fit into sso buffer");
+    EXPECT_TRUE(s.empty());
 }
 
-TEST(BigInt, UnaryMinusDoesNotChangeOriginal)
+TEST(Vector, PopBack)
 {
-    BigInt a = 7;
-    BigInt b = -a;
-    EXPECT_EQ(str(a), "7");
-    EXPECT_EQ(str(b), "-7");
+    my::vector<int> v = {1, 2, 3};
+    v.pop_back();
+    EXPECT_EQ(v.size(), 2);
+    EXPECT_EQ(v.back(), 2);
+    v.pop_back();
+    v.pop_back();
+    EXPECT_TRUE(v.empty());
+    v.pop_back(); // на пустом ничего не должно ломаться
+    EXPECT_TRUE(v.empty());
 }
 
-TEST(BigInt, Equal)
+TEST(Vector, Reserve)
 {
-    EXPECT_TRUE(BigInt(5) == BigInt(5));
-    EXPECT_FALSE(BigInt(5) == BigInt(6));
-    EXPECT_FALSE(BigInt(5) == BigInt(-5));
-    EXPECT_TRUE(BigInt(-5) == BigInt(-5));
-    EXPECT_TRUE(BigInt() == BigInt(0));
-    EXPECT_TRUE(BigInt("123456789012345678901234567890") == BigInt("123456789012345678901234567890"));
-    // отличаются только последней цифрой
-    EXPECT_FALSE(BigInt("123456789012345678901234567890") == BigInt("123456789012345678901234567891"));
-    // отличаются длиной
-    EXPECT_FALSE(BigInt("1000") == BigInt("10000"));
+    my::vector<int> v;
+    v.reserve(50);
+    EXPECT_GE(v.capacity(), 50);
+    EXPECT_EQ(v.size(), 0);
+
+    size_t cap = v.capacity();
+    for (int i = 0; i < 50; i++)
+        v.push_back(i);
+    EXPECT_EQ(v.capacity(), cap); // перевыделения быть не должно
+
+    v.reserve(10); // меньше не делаем
+    EXPECT_EQ(v.capacity(), cap);
 }
 
-TEST(BigInt, NotEqual)
+TEST(Vector, ReserveKeepsElements)
 {
-    EXPECT_TRUE(BigInt(5) != BigInt(6));
-    EXPECT_TRUE(BigInt(5) != BigInt(-5));
-    EXPECT_FALSE(BigInt(5) != BigInt(5));
-    EXPECT_FALSE(BigInt(0) != BigInt(-0));
+    my::vector<std::string> v = {"a", "b", "c"};
+    v.reserve(100);
+    EXPECT_EQ(v.size(), 3);
+    EXPECT_EQ(v[0], "a");
+    EXPECT_EQ(v[1], "b");
+    EXPECT_EQ(v[2], "c");
 }
 
-TEST(BigInt, Less)
+TEST(Vector, ReserveTooBig)
 {
-    EXPECT_TRUE(BigInt(1) < BigInt(2));
-    EXPECT_FALSE(BigInt(2) < BigInt(1));
-    EXPECT_FALSE(BigInt(2) < BigInt(2));
-    EXPECT_TRUE(BigInt(-2) < BigInt(1));
-    EXPECT_FALSE(BigInt(1) < BigInt(-2));
-    EXPECT_TRUE(BigInt(-3) < BigInt(-2));
-    EXPECT_FALSE(BigInt(-2) < BigInt(-3));
-    EXPECT_FALSE(BigInt(-2) < BigInt(-2));
-    EXPECT_TRUE(BigInt(-1) < BigInt(0));
-    EXPECT_TRUE(BigInt(0) < BigInt(1));
-    EXPECT_FALSE(BigInt(0) < BigInt(0));
+    my::vector<int> v;
+    EXPECT_THROW(v.reserve(v.max_size() + 1), std::length_error);
 }
 
-TEST(BigInt, LessDifferentLength)
+TEST(Vector, ShrinkToFit)
 {
-    EXPECT_TRUE(BigInt(999) < BigInt(1000));
-    EXPECT_FALSE(BigInt(1000) < BigInt(999));
-    EXPECT_TRUE(BigInt(-1000) < BigInt(-999));
-    EXPECT_FALSE(BigInt(-999) < BigInt(-1000));
-    EXPECT_TRUE(BigInt("99999999999999999999") < BigInt("100000000000000000000"));
-    EXPECT_TRUE(BigInt("-100000000000000000000") < BigInt("-99999999999999999999"));
+    my::vector<int> v;
+    v.reserve(100);
+    v.push_back(1);
+    v.push_back(2);
+    v.push_back(3);
+    v.shrink_to_fit();
+    EXPECT_EQ(v.capacity(), 3);
+    EXPECT_EQ(v.size(), 3);
+    EXPECT_EQ(v[2], 3);
 }
 
-TEST(BigInt, LessSameLengthDifferentDigit)
+TEST(Vector, ShrinkToFitEmpty)
 {
-    EXPECT_TRUE(BigInt("123456789012345678901234567890") < BigInt("123456789012345678901234567891"));
-    EXPECT_FALSE(BigInt("123456789012345678901234567891") < BigInt("123456789012345678901234567890"));
-    EXPECT_TRUE(BigInt("1999") < BigInt("2000"));
-    EXPECT_TRUE(BigInt("-2000") < BigInt("-1999"));
-    EXPECT_FALSE(BigInt("2000") < BigInt("1999"));
+    my::vector<int> v;
+    v.reserve(10);
+    v.shrink_to_fit();
+    EXPECT_EQ(v.capacity(), 0);
+    EXPECT_EQ(v.size(), 0);
+    v.push_back(1); // после этого всё ещё работает
+    EXPECT_EQ(v[0], 1);
 }
 
-TEST(BigInt, Greater)
+TEST(Vector, InsertMiddle)
 {
-    EXPECT_TRUE(BigInt(2) > BigInt(1));
-    EXPECT_FALSE(BigInt(1) > BigInt(2));
-    EXPECT_FALSE(BigInt(1) > BigInt(1));
-    EXPECT_TRUE(BigInt(1) > BigInt(-2));
-    EXPECT_TRUE(BigInt(-2) > BigInt(-3));
-    EXPECT_FALSE(BigInt(-3) > BigInt(-2));
-    EXPECT_TRUE(BigInt(0) > BigInt(-1));
+    my::vector<int> v = {1, 2, 4, 5};
+    v.insert(2, 3);
+    ASSERT_EQ(v.size(), 5);
+    for (int i = 0; i < 5; i++)
+        EXPECT_EQ(v[i], i + 1);
 }
 
-TEST(BigInt, LessEqual)
+TEST(Vector, InsertBeginAndEnd)
 {
-    EXPECT_TRUE(BigInt(1) <= BigInt(2));
-    EXPECT_TRUE(BigInt(2) <= BigInt(2));
-    EXPECT_FALSE(BigInt(3) <= BigInt(2));
-    EXPECT_TRUE(BigInt(-3) <= BigInt(-3));
-    EXPECT_TRUE(BigInt(-3) <= BigInt(-2));
-    EXPECT_FALSE(BigInt(-2) <= BigInt(-3));
-    EXPECT_TRUE(BigInt(0) <= BigInt(-0));
+    my::vector<int> v = {2, 3};
+    v.insert(0, 1);
+    v.insert(3, 4);
+    ASSERT_EQ(v.size(), 4);
+    for (int i = 0; i < 4; i++)
+        EXPECT_EQ(v[i], i + 1);
 }
 
-TEST(BigInt, GreaterEqual)
+TEST(Vector, InsertIntoEmpty)
 {
-    EXPECT_TRUE(BigInt(2) >= BigInt(1));
-    EXPECT_TRUE(BigInt(2) >= BigInt(2));
-    EXPECT_FALSE(BigInt(1) >= BigInt(2));
-    EXPECT_TRUE(BigInt(-3) >= BigInt(-3));
-    EXPECT_TRUE(BigInt(-2) >= BigInt(-3));
-    EXPECT_FALSE(BigInt(-3) >= BigInt(-2));
-    EXPECT_TRUE(BigInt(0) >= BigInt(-0));
+    my::vector<std::string> v;
+    v.insert(0, "x");
+    ASSERT_EQ(v.size(), 1);
+    EXPECT_EQ(v[0], "x");
 }
 
-
-TEST(BigInt, CopyConstructor)
+TEST(Vector, InsertWithReallocation)
 {
-    BigInt a("123456789012345678901234567890");
-    BigInt b(a);
-    EXPECT_TRUE(a == b);
-
-    // b должен быть независимой копией
-    b = b + 1;
-    EXPECT_EQ(str(a), "123456789012345678901234567890");
-    EXPECT_EQ(str(b), "123456789012345678901234567891");
+    my::vector<int> v;
+    for (int i = 0; i < 10; i++)
+        v.insert(0, i); // каждый раз в начало, несколько раз сработает рост
+    ASSERT_EQ(v.size(), 10);
+    for (int i = 0; i < 10; i++)
+        EXPECT_EQ(v[i], 9 - i);
 }
 
-TEST(BigInt, CopyConstructorZero)
+TEST(Vector, InsertOwnElement)
 {
-    BigInt a;
-    BigInt b(a);
-    EXPECT_EQ(str(b), "0");
-    EXPECT_TRUE(a == b);
+    my::vector<std::string> v = {"a", "b", "c"};
+    v.insert(0, v[2]);
+    ASSERT_EQ(v.size(), 4);
+    EXPECT_EQ(v[0], "c");
+    EXPECT_EQ(v[1], "a");
+    EXPECT_EQ(v[3], "c");
 }
 
-TEST(BigInt, CopyAssign)
+TEST(Vector, InsertOutOfRange)
 {
-    BigInt a("-123456789012345678901234567890");
-    BigInt b = 5;
+    my::vector<int> v = {1, 2, 3};
+    EXPECT_THROW(v.insert(4, 10), std::out_of_range);
+    EXPECT_EQ(v.size(), 3);
+}
+
+TEST(Vector, InsertMove)
+{
+    my::vector<std::string> v = {"a", "c"};
+    std::string s = "this string is long enough to be allocated on the heap";
+    v.insert(1, std::move(s));
+    EXPECT_EQ(v[1], "this string is long enough to be allocated on the heap");
+    EXPECT_EQ(v[2], "c");
+}
+
+TEST(Vector, EmplaceBack)
+{
+    my::vector<std::string> v;
+    v.emplace_back(3, 'z');
+    v.emplace_back("abc");
+    ASSERT_EQ(v.size(), 2);
+    EXPECT_EQ(v[0], "zzz");
+    EXPECT_EQ(v[1], "abc");
+}
+
+TEST(Vector, Emplace)
+{
+    my::vector<std::string> v = {"a", "d"};
+    v.emplace(1, 2, 'c'); // строка "cc"
+    ASSERT_EQ(v.size(), 3);
+    EXPECT_EQ(v[0], "a");
+    EXPECT_EQ(v[1], "cc");
+    EXPECT_EQ(v[2], "d");
+
+    v.emplace(3, "end");
+    EXPECT_EQ(v.back(), "end");
+    EXPECT_THROW(v.emplace(10, "bad"), std::out_of_range);
+}
+
+TEST(Vector, EmplaceNoCopy)
+{
+    Counted::copies = 0;
+    {
+        my::vector<Counted> v;
+        v.reserve(10);
+        v.emplace_back(1);
+        v.emplace_back(2);
+        v.emplace(0, 3);
+        EXPECT_EQ(Counted::copies, 0);
+        EXPECT_EQ(v[0].value, 3);
+        EXPECT_EQ(v[1].value, 1);
+        EXPECT_EQ(v[2].value, 2);
+    }
+    EXPECT_EQ(Counted::alive, 0);
+}
+
+TEST(Vector, UniquePtr)
+{
+    // тип который нельзя копировать
+    my::vector<std::unique_ptr<int>> v;
+    v.push_back(std::unique_ptr<int>(new int(1)));
+    v.emplace_back(new int(3));
+    v.insert(1, std::unique_ptr<int>(new int(2)));
+    ASSERT_EQ(v.size(), 3);
+    EXPECT_EQ(*v[0], 1);
+    EXPECT_EQ(*v[1], 2);
+    EXPECT_EQ(*v[2], 3);
+    v.reverse();
+    EXPECT_EQ(*v[0], 3);
+    v.resize(1);
+    EXPECT_EQ(v.size(), 1);
+}
+
+TEST(Vector, ResizeBigger)
+{
+    my::vector<int> v = {1, 2};
+    v.resize(5);
+    ASSERT_EQ(v.size(), 5);
+    EXPECT_EQ(v[0], 1);
+    EXPECT_EQ(v[1], 2);
+    EXPECT_EQ(v[2], 0);
+    EXPECT_EQ(v[4], 0);
+}
+
+TEST(Vector, ResizeWithValue)
+{
+    my::vector<int> v = {1, 2};
+    v.resize(4, 9);
+    ASSERT_EQ(v.size(), 4);
+    EXPECT_EQ(v[1], 2);
+    EXPECT_EQ(v[2], 9);
+    EXPECT_EQ(v[3], 9);
+}
+
+TEST(Vector, ResizeWithOwnElement)
+{
+    my::vector<std::string> v = {"abc"};
+    v.resize(20, v[0]); // при росте старый буфер умирает
+    ASSERT_EQ(v.size(), 20);
+    for (size_t i = 0; i < 20; i++)
+        EXPECT_EQ(v[i], "abc");
+}
+
+TEST(Vector, ResizeSmaller)
+{
+    my::vector<int> v = {1, 2, 3, 4, 5};
+    size_t cap = v.capacity();
+    v.resize(2);
+    ASSERT_EQ(v.size(), 2);
+    EXPECT_EQ(v.back(), 2);
+    EXPECT_EQ(v.capacity(), cap); // память не отдаём
+}
+
+TEST(Vector, ResizeSameAndZero)
+{
+    my::vector<int> v = {1, 2, 3};
+    v.resize(3);
+    EXPECT_EQ(v.size(), 3);
+    v.resize(0);
+    EXPECT_TRUE(v.empty());
+}
+
+TEST(Vector, Reverse)
+{
+    my::vector<int> v = {1, 2, 3, 4, 5};
+    v.reverse();
+    for (int i = 0; i < 5; i++)
+        EXPECT_EQ(v[i], 5 - i);
+}
+
+TEST(Vector, ReverseEven)
+{
+    my::vector<std::string> v = {"a", "b", "c", "d"};
+    v.reverse();
+    EXPECT_EQ(v[0], "d");
+    EXPECT_EQ(v[1], "c");
+    EXPECT_EQ(v[2], "b");
+    EXPECT_EQ(v[3], "a");
+}
+
+TEST(Vector, ReverseTrivial)
+{
+    my::vector<int> empty;
+    empty.reverse();
+    EXPECT_TRUE(empty.empty());
+
+    my::vector<int> one = {5};
+    one.reverse();
+    EXPECT_EQ(one[0], 5);
+}
+
+TEST(Vector, CopyConstructor)
+{
+    my::vector<std::string> a = {"x", "y", "z"};
+    my::vector<std::string> b(a);
+    ASSERT_EQ(b.size(), 3);
+    EXPECT_EQ(b[1], "y");
+    EXPECT_NE(a.data(), b.data());
+
+    b[0] = "changed";
+    EXPECT_EQ(a[0], "x"); // глубокое копирование
+}
+
+TEST(Vector, CopyAssignment)
+{
+    my::vector<int> a = {1, 2, 3};
+    my::vector<int> b = {9, 9, 9, 9, 9};
     b = a;
-    EXPECT_TRUE(a == b);
-    EXPECT_EQ(str(b), "-123456789012345678901234567890");
-
-    a = a + 1;
-    EXPECT_EQ(str(b), "-123456789012345678901234567890");
+    ASSERT_EQ(b.size(), 3);
+    EXPECT_EQ(b[2], 3);
+    a[0] = 100;
+    EXPECT_EQ(b[0], 1);
 }
 
-TEST(BigInt, CopyAssignToShorterAndLonger)
+TEST(Vector, SelfAssignment)
 {
-    BigInt big("123456789012345678901234567890");
-    BigInt small = 3;
-
-    small = big;
-    EXPECT_EQ(str(small), "123456789012345678901234567890");
-
-    BigInt big2("99999999999999999999999999");
-    big2 = BigInt(3);
-    EXPECT_EQ(str(big2), "3");
-}
-
-TEST(BigInt, CopyAssignZero)
-{
-    BigInt a("123456789012345678901234567890");
-    BigInt z;
-    a = z;
-    EXPECT_EQ(str(a), "0");
-}
-
-TEST(BigInt, SelfAssign)
-{
-    BigInt a("123456789012345678901234567890");
-    BigInt &ref = a;
+    my::vector<int> a = {1, 2, 3};
+    my::vector<int> &ref = a;
     a = ref;
-    EXPECT_EQ(str(a), "123456789012345678901234567890");
-
-    a = std::move(ref);
-    EXPECT_EQ(str(a), "123456789012345678901234567890");
+    ASSERT_EQ(a.size(), 3);
+    EXPECT_EQ(a[1], 2);
 }
 
-TEST(BigInt, ChainAssign)
+TEST(Vector, CopyEmpty)
 {
-    BigInt a, b, c;
-    a = b = c = BigInt("-777777777777777777777");
-    EXPECT_EQ(str(a), "-777777777777777777777");
-    EXPECT_EQ(str(b), "-777777777777777777777");
-    EXPECT_EQ(str(c), "-777777777777777777777");
+    my::vector<int> a;
+    my::vector<int> b(a);
+    EXPECT_TRUE(b.empty());
+    b = a;
+    EXPECT_TRUE(b.empty());
 }
 
-TEST(BigInt, MoveConstructor)
+TEST(Vector, MoveConstructor)
 {
-    BigInt a("123456789012345678901234567890");
-    BigInt b(std::move(a));
-    EXPECT_EQ(str(b), "123456789012345678901234567890");
+    my::vector<std::string> a = {"x", "y"};
+    std::string *old = a.data();
+    my::vector<std::string> b(std::move(a));
+    EXPECT_EQ(b.data(), old); // буфер переехал, а не скопировался
+    ASSERT_EQ(b.size(), 2);
+    EXPECT_EQ(b[1], "y");
+    EXPECT_TRUE(a.empty());
+    EXPECT_EQ(a.capacity(), 0);
 
-    // после перемещения a - валидный ноль
-    EXPECT_EQ(str(a), "0");
-    EXPECT_TRUE(a == BigInt(0));
-    a = BigInt(15);
-    EXPECT_EQ(str(a), "15");
+    a.push_back("again"); // после перемещения пользоваться можно
+    EXPECT_EQ(a[0], "again");
 }
 
-TEST(BigInt, MoveAssign)
+TEST(Vector, MoveAssignment)
 {
-    BigInt a("-123456789012345678901234567890");
-    BigInt b("5");
+    my::vector<std::string> a = {"x", "y", "z"};
+    my::vector<std::string> b = {"old"};
+    std::string *old = a.data();
     b = std::move(a);
-    EXPECT_EQ(str(b), "-123456789012345678901234567890");
-    EXPECT_EQ(str(a), "0");
-
-    // перемещённый объект можно использовать
-    a = b + 1;
-    EXPECT_EQ(str(a), "-123456789012345678901234567889");
+    EXPECT_EQ(b.data(), old);
+    ASSERT_EQ(b.size(), 3);
+    EXPECT_EQ(b[2], "z");
+    EXPECT_TRUE(a.empty());
 }
 
-TEST(BigInt, MoveZero)
-{
-    BigInt a;
-    BigInt b(std::move(a));
-    EXPECT_EQ(str(b), "0");
-
-    BigInt c = 5;
-    c = std::move(b);
-    EXPECT_EQ(str(c), "0");
-}
-
-TEST(BigInt, ReturnFromFunction)
+TEST(Vector, ReturnFromFunction)
 {
     auto make = []() {
-        BigInt x("99999999999999999999");
-        return x + 1;
+        my::vector<int> v;
+        for (int i = 0; i < 10; i++)
+            v.push_back(i);
+        return v;
     };
-    BigInt r = make();
-    EXPECT_EQ(str(r), "100000000000000000000");
+    my::vector<int> r = make();
+    ASSERT_EQ(r.size(), 10);
+    EXPECT_EQ(r[9], 9);
 }
 
-TEST(BigInt, Output)
+TEST(Vector, NoLeaks)
 {
-    std::stringstream ss;
-    ss << BigInt(12) << ' ' << BigInt(-34) << ' ' << BigInt(0);
-    EXPECT_EQ(ss.str(), "12 -34 0");
+    Counted::alive = 0;
+    {
+        my::vector<Counted> v;
+        for (int i = 0; i < 20; i++)
+            v.push_back(Counted(i));
+        v.insert(5, Counted(100));
+        v.pop_back();
+        v.resize(30);
+        v.resize(10);
+        v.shrink_to_fit();
+        my::vector<Counted> w(v);
+        my::vector<Counted> z(std::move(w));
+        v = z;
+        EXPECT_EQ(Counted::alive, 20); // v и z по 10 штук
+    }
+    EXPECT_EQ(Counted::alive, 0);
 }
 
-TEST(BigInt, ConstOperands)
+TEST(Vector, ReallocMovesNotCopies)
 {
-    const BigInt a = 10;
-    const BigInt b = 20;
-    EXPECT_EQ(str(a + b), "30");
-    EXPECT_EQ(str(a - b), "-10");
-    EXPECT_EQ(str(a * b), "200");
-    EXPECT_EQ(str(-a), "-10");
-    EXPECT_TRUE(a < b);
+    // у Counted перемещение noexcept, значит при росте копий быть не должно
+    my::vector<Counted> v;
+    v.reserve(4);
+    for (int i = 0; i < 4; i++)
+        v.push_back(Counted(i));
+    Counted::copies = 0;
+    v.push_back(Counted(4)); // тут рост
+    EXPECT_EQ(Counted::copies, 0);
+    EXPECT_EQ(v[3].value, 3);
+    EXPECT_EQ(v[4].value, 4);
 }
 
-TEST(BigInt, LongNumbers)
+struct Bomb
 {
-    // 1000 цифр
-    std::string s(1000, '9');
-    BigInt a(s);
-    EXPECT_EQ(str(a), s);
+    static int left;
+    Counted c;
+    Bomb() : c(1) {}
+    Bomb(const Bomb &o) : c(o.c)
+    {
+        if (left == 0)
+            throw std::runtime_error("boom");
+        left--;
+    }
+};
+int Bomb::left = 0;
 
-    std::string expected = "1" + std::string(1000, '0');
-    EXPECT_EQ(str(a + 1), expected);
-    EXPECT_EQ(str((a + 1) - 1), s);
-
-    // (10^1000 - 1)^2 = 10^2000 - 2 * 10^1000 + 1
-    std::string sq = std::string(999, '9') + "8" + std::string(999, '0') + "1";
-    EXPECT_EQ(str(a * a), sq);
+TEST(Vector, ConstructorException)
+{
+    // если копирование кинуло, уже созданные элементы должны уничтожиться
+    Counted::alive = 0;
+    {
+        Bomb proto;
+        Bomb::left = 3;
+        EXPECT_THROW(my::vector<Bomb> v(10, proto), std::runtime_error);
+        EXPECT_EQ(Counted::alive, 1); // остался только proto
+    }
+    EXPECT_EQ(Counted::alive, 0);
 }
 
+TEST(Vector, Iterators)
+{
+    my::vector<int> v = {1, 2, 3, 4};
+    int sum = 0;
+    for (int x : v)
+        sum += x;
+    EXPECT_EQ(sum, 10);
+    EXPECT_EQ(v.end() - v.begin(), 4);
+}
+
+TEST(Vector, Swap)
+{
+    my::vector<int> a = {1, 2};
+    my::vector<int> b = {3, 4, 5};
+    a.swap(b);
+    EXPECT_EQ(a.size(), 3);
+    EXPECT_EQ(b.size(), 2);
+    EXPECT_EQ(a[0], 3);
+    EXPECT_EQ(b[1], 2);
+}
+
+TEST(Vector, Clear)
+{
+    my::vector<int> v = {1, 2, 3};
+    size_t cap = v.capacity();
+    v.clear();
+    EXPECT_TRUE(v.empty());
+    EXPECT_EQ(v.capacity(), cap);
+}
+
+TEST(Vector, VectorOfVectors)
+{
+    my::vector<my::vector<int>> v;
+    for (int i = 0; i < 5; i++)
+    {
+        my::vector<int> inner;
+        for (int j = 0; j <= i; j++)
+            inner.push_back(j);
+        v.push_back(inner);
+    }
+    ASSERT_EQ(v.size(), 5);
+    EXPECT_EQ(v[4].size(), 5);
+    EXPECT_EQ(v[2][2], 2);
+    v.insert(0, my::vector<int>(3, 7));
+    EXPECT_EQ(v[0][1], 7);
+    EXPECT_EQ(v[1].size(), 1);
+}
+
+TEST(Vector, LargeAmount)
+{
+    my::vector<int> v;
+    for (int i = 0; i < 100000; i++)
+        v.push_back(i);
+    ASSERT_EQ(v.size(), 100000);
+    EXPECT_EQ(v[0], 0);
+    EXPECT_EQ(v[99999], 99999);
+}
+
+// ---------- vector<bool> ----------
+
+TEST(VectorBool, DefaultConstructor)
+{
+    my::vector<bool> v;
+    EXPECT_TRUE(v.empty());
+    EXPECT_EQ(v.size(), 0);
+    EXPECT_EQ(v.capacity(), 0);
+}
+
+TEST(VectorBool, SizeConstructor)
+{
+    my::vector<bool> v(10);
+    EXPECT_EQ(v.size(), 10);
+    for (size_t i = 0; i < 10; i++)
+        EXPECT_FALSE(v[i]);
+
+    my::vector<bool> t(70, true);
+    EXPECT_EQ(t.size(), 70);
+    for (size_t i = 0; i < 70; i++)
+        EXPECT_TRUE(t[i]);
+}
+
+TEST(VectorBool, InitializerList)
+{
+    my::vector<bool> v = {true, false, true, true};
+    ASSERT_EQ(v.size(), 4);
+    EXPECT_TRUE(v[0]);
+    EXPECT_FALSE(v[1]);
+    EXPECT_TRUE(v[2]);
+    EXPECT_TRUE(v[3]);
+}
+
+TEST(VectorBool, IsBitPacked)
+{
+    // 1000 бит должны влезать в 16 блоков по 64, а не в 1000 байт
+    my::vector<bool> v(1000);
+    EXPECT_GE(v.capacity(), 1000);
+    EXPECT_LT(v.capacity(), 1000 + 64);
+}
+
+TEST(VectorBool, SetAndGet)
+{
+    my::vector<bool> v(130);
+    v[0] = true;
+    v[63] = true;
+    v[64] = true;
+    v[129] = true;
+    for (size_t i = 0; i < 130; i++)
+    {
+        bool expected = (i == 0 || i == 63 || i == 64 || i == 129);
+        EXPECT_EQ((bool)v[i], expected) << "i = " << i;
+    }
+    v[63] = false;
+    EXPECT_FALSE(v[63]);
+    EXPECT_TRUE(v[64]); // соседний блок не задет
+}
+
+TEST(VectorBool, ProxyAssignFromProxy)
+{
+    my::vector<bool> v = {true, false};
+    v[1] = v[0];
+    EXPECT_TRUE(v[1]);
+    v[0] = false;
+    EXPECT_TRUE(v[1]); // скопировалось значение, а не ссылка
+}
+
+TEST(VectorBool, Flip)
+{
+    my::vector<bool> v = {true, false};
+    v[0].flip();
+    v[1].flip();
+    EXPECT_FALSE(v[0]);
+    EXPECT_TRUE(v[1]);
+}
+
+TEST(VectorBool, ConstSubscript)
+{
+    my::vector<bool> v = {false, true};
+    const my::vector<bool> &c = v;
+    EXPECT_FALSE(c[0]);
+    EXPECT_TRUE(c[1]);
+    EXPECT_FALSE(c.front());
+    EXPECT_TRUE(c.back());
+}
+
+TEST(VectorBool, FrontBack)
+{
+    my::vector<bool> v = {false, true, false};
+    EXPECT_FALSE(v.front());
+    EXPECT_FALSE(v.back());
+    v.front() = true;
+    v.back() = true;
+    EXPECT_TRUE(v[0]);
+    EXPECT_TRUE(v[2]);
+}
+
+TEST(VectorBool, Data)
+{
+    my::vector<bool> v(3);
+    v[0] = true;
+    v[2] = true;
+    ASSERT_NE(v.data(), nullptr);
+    EXPECT_EQ(v.data()[0], 5u); // 101 в двоичной
+}
+
+TEST(VectorBool, PushBackPopBack)
+{
+    my::vector<bool> v;
+    for (int i = 0; i < 200; i++)
+        v.push_back(i % 3 == 0);
+    ASSERT_EQ(v.size(), 200);
+    for (int i = 0; i < 200; i++)
+        EXPECT_EQ((bool)v[i], i % 3 == 0) << "i = " << i;
+
+    v.pop_back();
+    EXPECT_EQ(v.size(), 199);
+    while (!v.empty())
+        v.pop_back();
+    v.pop_back(); // пустой
+    EXPECT_EQ(v.size(), 0);
+}
+
+TEST(VectorBool, PushBackAfterPop)
+{
+    // после pop_back в старом бите может остаться единица, push_back должен её перезаписать
+    my::vector<bool> v;
+    v.push_back(true);
+    v.pop_back();
+    v.push_back(false);
+    EXPECT_FALSE(v[0]);
+}
+
+TEST(VectorBool, MaxSize)
+{
+    my::vector<bool> v;
+    EXPECT_GT(v.max_size(), 1000000);
+}
+
+TEST(VectorBool, ReserveAndShrink)
+{
+    my::vector<bool> v;
+    v.reserve(500);
+    EXPECT_GE(v.capacity(), 500);
+    EXPECT_EQ(v.size(), 0);
+
+    v.push_back(true);
+    v.push_back(false);
+    v.push_back(true);
+    v.shrink_to_fit();
+    EXPECT_GE(v.capacity(), 3);
+    EXPECT_LE(v.capacity(), 64);
+    ASSERT_EQ(v.size(), 3);
+    EXPECT_TRUE(v[0]);
+    EXPECT_FALSE(v[1]);
+    EXPECT_TRUE(v[2]);
+
+    EXPECT_THROW(v.reserve(v.max_size() + 1), std::length_error);
+}
+
+TEST(VectorBool, ShrinkEmpty)
+{
+    my::vector<bool> v;
+    v.reserve(100);
+    v.shrink_to_fit();
+    EXPECT_EQ(v.capacity(), 0);
+}
+
+TEST(VectorBool, Insert)
+{
+    my::vector<bool> v = {true, true, true};
+    v.insert(1, false);
+    ASSERT_EQ(v.size(), 4);
+    EXPECT_TRUE(v[0]);
+    EXPECT_FALSE(v[1]);
+    EXPECT_TRUE(v[2]);
+    EXPECT_TRUE(v[3]);
+
+    v.insert(0, false);
+    v.insert(5, false);
+    ASSERT_EQ(v.size(), 6);
+    EXPECT_FALSE(v[0]);
+    EXPECT_TRUE(v[1]);
+    EXPECT_FALSE(v[5]);
+    EXPECT_THROW(v.insert(10, true), std::out_of_range);
+}
+
+TEST(VectorBool, InsertAcrossBlocks)
+{
+    my::vector<bool> v(64, true); // ровно один полный блок
+    v.insert(10, false);
+    ASSERT_EQ(v.size(), 65);
+    for (size_t i = 0; i < 65; i++)
+        EXPECT_EQ((bool)v[i], i != 10) << "i = " << i;
+}
+
+TEST(VectorBool, Emplace)
+{
+    my::vector<bool> v;
+    v.emplace(0, true);
+    v.emplace_back(false);
+    v.emplace(1, true);
+    ASSERT_EQ(v.size(), 3);
+    EXPECT_TRUE(v[0]);
+    EXPECT_TRUE(v[1]);
+    EXPECT_FALSE(v[2]);
+    EXPECT_THROW(v.emplace(4, true), std::out_of_range);
+}
+
+TEST(VectorBool, Resize)
+{
+    my::vector<bool> v = {true, false};
+    v.resize(5, true);
+    ASSERT_EQ(v.size(), 5);
+    EXPECT_TRUE(v[0]);
+    EXPECT_FALSE(v[1]);
+    EXPECT_TRUE(v[2]);
+    EXPECT_TRUE(v[4]);
+
+    v.resize(1);
+    EXPECT_EQ(v.size(), 1);
+    v.resize(3); // новые должны быть false, хоть там раньше и были единицы
+    EXPECT_TRUE(v[0]);
+    EXPECT_FALSE(v[1]);
+    EXPECT_FALSE(v[2]);
+
+    v.resize(0);
+    EXPECT_TRUE(v.empty());
+}
+
+TEST(VectorBool, Reverse)
+{
+    my::vector<bool> v = {true, true, false, false, false};
+    v.reverse();
+    EXPECT_FALSE(v[0]);
+    EXPECT_FALSE(v[1]);
+    EXPECT_FALSE(v[2]);
+    EXPECT_TRUE(v[3]);
+    EXPECT_TRUE(v[4]);
+}
+
+TEST(VectorBool, ReverseLong)
+{
+    my::vector<bool> v(100);
+    for (size_t i = 0; i < 100; i++)
+        v[i] = (i < 30);
+    v.reverse();
+    for (size_t i = 0; i < 100; i++)
+        EXPECT_EQ((bool)v[i], i >= 70) << "i = " << i;
+
+    my::vector<bool> e;
+    e.reverse();
+    EXPECT_TRUE(e.empty());
+}
+
+TEST(VectorBool, Copy)
+{
+    my::vector<bool> a = {true, false, true};
+    my::vector<bool> b(a);
+    ASSERT_EQ(b.size(), 3);
+    EXPECT_TRUE(b[2]);
+    b[0] = false;
+    EXPECT_TRUE(a[0]);
+
+    my::vector<bool> c(200, true);
+    c = a;
+    ASSERT_EQ(c.size(), 3);
+    EXPECT_FALSE(c[1]);
+
+    my::vector<bool> &ref = c;
+    c = ref; // само в себя
+    EXPECT_EQ(c.size(), 3);
+}
+
+TEST(VectorBool, Move)
+{
+    my::vector<bool> a(100, true);
+    my::vector<bool> b(std::move(a));
+    EXPECT_EQ(b.size(), 100);
+    EXPECT_TRUE(b[99]);
+    EXPECT_TRUE(a.empty());
+
+    my::vector<bool> c = {false};
+    c = std::move(b);
+    EXPECT_EQ(c.size(), 100);
+    EXPECT_TRUE(c[50]);
+    EXPECT_TRUE(b.empty());
+
+    a.push_back(true); // использовать после move можно
+    EXPECT_TRUE(a[0]);
+}
+
+TEST(VectorBool, Clear)
+{
+    my::vector<bool> v(10, true);
+    v.clear();
+    EXPECT_TRUE(v.empty());
+    v.push_back(false);
+    EXPECT_FALSE(v[0]);
+}
+
+TEST(VectorBool, Swap)
+{
+    my::vector<bool> a = {true};
+    my::vector<bool> b = {false, false};
+    a.swap(b);
+    EXPECT_EQ(a.size(), 2);
+    EXPECT_EQ(b.size(), 1);
+    EXPECT_TRUE(b[0]);
+}
+
+TEST(VectorBool, InsideOtherVector)
+{
+    my::vector<my::vector<bool>> v;
+    v.push_back(my::vector<bool>(3, true));
+    v.push_back(my::vector<bool>(2, false));
+    EXPECT_TRUE(v[0][2]);
+    EXPECT_FALSE(v[1][1]);
+}

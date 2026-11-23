@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(hw07_bigint CXX)
+project(hw07_vector CXX)
 
 set(CMAKE_CXX_STANDARD 14)
 
@@ -13,8 +13,8 @@ FetchContent_MakeAvailable(googletest)
 
 enable_testing()
 
-add_executable(bigint_tests bigint.cpp test.cpp)
-target_link_libraries(bigint_tests GTest::gtest_main)
+add_executable(vector_tests test.cpp)
+target_link_libraries(vector_tests GTest::gtest_main)
 
 include(GoogleTest)
-gtest_discover_tests(bigint_tests)
+gtest_discover_tests(vector_tests)
